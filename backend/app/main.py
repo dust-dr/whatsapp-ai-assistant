@@ -5,7 +5,10 @@ from app.db.base import Base
 from app.db.session import engine
 import app.models
 
-# Create all tables on Neon automatically
+# Import and register routers
+from app.api.v1.chat import router as chat_router
+
+# Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -21,6 +24,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Register the chat router
+# prefix="/api/v1" means all chat routes start with /api/v1
+# so our endpoint becomes: /api/v1/chat
+# tags=["chat"] groups it nicely in the /docs page
+app.include_router(
+    chat_router,
+    prefix="/api/v1",
+    tags=["chat"]
 )
 
 @app.get("/")
