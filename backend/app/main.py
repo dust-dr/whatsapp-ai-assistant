@@ -4,6 +4,8 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
 import app.models
+
+from app.api.v1.auth import router as auth_router
 from app.api.v1.chat import router as chat_router
 from app.api.v1.knowledge import router as knowledge_router
 
@@ -24,7 +26,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
+app.include_router(auth_router,      prefix="/api/v1", tags=["auth"])
+app.include_router(chat_router,      prefix="/api/v1", tags=["chat"])
 app.include_router(knowledge_router, prefix="/api/v1", tags=["knowledge"])
 
 @app.get("/")
