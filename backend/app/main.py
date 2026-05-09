@@ -4,11 +4,9 @@ from app.core.config import settings
 from app.db.base import Base
 from app.db.session import engine
 import app.models
-
-# Import and register routers
 from app.api.v1.chat import router as chat_router
+from app.api.v1.knowledge import router as knowledge_router
 
-# Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -26,15 +24,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register the chat router
-# prefix="/api/v1" means all chat routes start with /api/v1
-# so our endpoint becomes: /api/v1/chat
-# tags=["chat"] groups it nicely in the /docs page
-app.include_router(
-    chat_router,
-    prefix="/api/v1",
-    tags=["chat"]
-)
+app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
+app.include_router(knowledge_router, prefix="/api/v1", tags=["knowledge"])
 
 @app.get("/")
 def root():

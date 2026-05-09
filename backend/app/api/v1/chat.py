@@ -1,98 +1,109 @@
-# This file defines the /chat endpoint.
-#
-# Right now it is a SIMPLE version — no database, no RAG.
-# Just: receive message → ask Groq → return reply
-#
-# We will upgrade it step by step to add:
-# - customer history (database)
-# - product knowledge (ChromaDB/RAG)
-# - WhatsApp integration
-
 from fastapi import APIRouter
 from pydantic import BaseModel
 from app.services.ai_service import generate_reply
+from app.services.rag_service import rag_service
 
-# APIRouter is like a mini FastAPI app
-# We group related endpoints together in routers
-# then attach them to the main app
 router = APIRouter()
 
 
-# Pydantic models define what data the endpoint
-# accepts and returns. FastAPI validates this automatically.
-# If someone sends wrong data, FastAPI rejects it with a clear error.
-
 class ChatRequest(BaseModel):
-    """What the caller must send to this endpoint"""
-    message: str                    # the customer's message
-    business_name: str = "Our Shop" # which business the AI represents
-    business_type: str = "shop"     # type of business
-    ai_name: str = "Ama"            # AI assistant's name
+    message: str
+    business_id: str = ""           # if provided, Ama uses real knowledge
+    business_name: str = "Our Shop"
+    business_type: str = "shop"
+    ai_name: str = "Ama"
+
 
 class ChatResponse(BaseModel):
-    """What this endpoint sends back"""
-    reply: str      # the AI's reply
-    ai_name: str    # which AI assistant replied
+    reply: str
+    ai_name: str
+    knowledge_used: bool            # tells us if RAG found anything
 
-
-# This is the SYSTEM PROMPT.
-# It is the set of instructions the AI reads BEFORE
-# seeing the customer's message.
-# Think of it as the AI's job description and briefing.
-#
-# The AI will always stay in character based on these instructions.
-# This is called "prompt engineering" — crafting instructions
-# that make the AI behave exactly how you want.
 
 def build_system_prompt(
     business_name: str,
     business_type: str,
-    ai_name: str
+    ai_name: str,
+    knowledge_context: str
 ) -> str:
-    return f"""You are {ai_name}, a friendly and helpful AI sales assistant for {business_name}, a {business_type}.
+    """
+    Builds the AI's instructions.
+    
+    If we have real knowledge from ChromaDB, we include it
+    and tell Ama to ONLY use that knowledge.
+    
+    If we have no knowledge, Ama uses general knowledge
+    but admits she doesn't have specific details.
+    """
 
-Your personality:
+    if knowledge_context:
+        knowledge_section = f"""
+IMPORTANT: Use ONLY the information below to answer questions.
+Do not make up prices, products, or details not listed here.
+If the customer asks about something not in this list, 
+say you will check and get back to them.
+
+BUSINESS KNOWLEDGE:
+{knowledge_context}
+"""
+    else:
+        knowledge_section = """
+You don't have specific product information yet.
+Be helpful but honest — don't make up specific prices or products.
+Encourage the customer to ask questions and tell them 
+you'll connect them with the right person for details.
+"""
+
+    return f"""You are {ai_name}, a friendly AI sales assistant for {business_name}, a {business_type}.
+
+{knowledge_section}
+
+Your communication style:
 - Warm, friendly, and professional
-- You speak like a real person on WhatsApp — not like a formal email
-- You use short paragraphs (this is WhatsApp, not an essay)
-- You occasionally use relevant emojis to be friendly (but not too many)
-- You always try to be helpful and move the customer toward a purchase
+- Short messages — this is WhatsApp not email
+- Use emojis naturally but not excessively
+- Always end with a question or next step
+- If customer wants to buy, help them take the next step
 
-Your job:
-- Answer customer questions about the business
-- Recommend products or services when relevant  
-- Capture customer interest (ask for their name, what they need)
-- If you don't know something, say so honestly
-- Never make up prices or information you are not sure about
-
-Important rules:
-- Keep replies SHORT and conversational — this is WhatsApp
-- Never write long paragraphs — use short sentences
-- Always end with a question or next step to keep conversation going
-- If customer seems interested in buying, ask how you can help them complete the purchase
-
-You are representing {business_name}. Be their best employee."""
+You represent {business_name}. Be their best employee."""
 
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    Simple chat endpoint.
+    Chat endpoint with RAG support.
     
-    Send a message, get an AI reply back.
+    If business_id is provided, searches ChromaDB for
+    relevant knowledge before generating a reply.
     
-    This is the foundation — we will build on top of this
-    to add customer memory, product knowledge, and WhatsApp.
+    If no business_id, works as a generic assistant.
     """
 
-    # Build the system prompt using the business details
+    knowledge_context = ""
+    knowledge_used = False
+
+    # If business_id is provided, search for relevant knowledge
+    if request.business_id:
+        relevant_chunks = rag_service.search(
+            business_id=request.business_id,
+            query=request.message,
+            top_k=4
+        )
+
+        if relevant_chunks:
+            # Join the chunks into one context block
+            knowledge_context = "\n\n".join(relevant_chunks)
+            knowledge_used = True
+
+    # Build system prompt with or without knowledge
     system_prompt = build_system_prompt(
         business_name=request.business_name,
         business_type=request.business_type,
-        ai_name=request.ai_name
+        ai_name=request.ai_name,
+        knowledge_context=knowledge_context
     )
 
-    # Call the AI service — it handles Groq or Ollama
+    # Generate reply
     reply = await generate_reply(
         system_prompt=system_prompt,
         user_message=request.message
@@ -100,5 +111,6 @@ async def chat(request: ChatRequest):
 
     return ChatResponse(
         reply=reply,
-        ai_name=request.ai_name
+        ai_name=request.ai_name,
+        knowledge_used=knowledge_used
     )
